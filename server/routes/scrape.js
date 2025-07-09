@@ -95,20 +95,16 @@ wss.on('connection', (ws, request) => {
 
 const startRecordingSession = async (url, ws) => {
   const proxy = getNextProxy();
-  // const browser = await puppeteer.launch({
-  //   headless: false,
-  //   // executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
-  //   args: [
-  //     `--proxy-server=${proxy.host}:${proxy.port}`,
-  //     '--no-sandbox',
-  //     '--disable-setuid-sandbox',
-  //     '--disable-gpu',
-  //   ],
-  //   userDataDir: './user_data',
-  // });
   const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    headless: false,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+    args: [
+      `--proxy-server=${proxy.host}:${proxy.port}`,
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-gpu',
+    ],
+    userDataDir: './user_data',
   });
 
   const page = (await browser.pages())[0];
