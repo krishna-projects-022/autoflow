@@ -413,36 +413,105 @@ router.post('/schedule-job', authenticateToken, async (req, res) => {
 });
 
 router.post('/scrape', authenticateToken, async (req, res) => {
-  const { url, username = '', password = '', dynamic = 'yes', workflow = [], jobId, workflowId } = req.body;
+  const {
+    url,
+    username = '',
+    password = '',
+    dynamic = 'yes',
+    workflow = [],
+    jobId,
+    workflowId
+  } = req.body;
+
+  // Log incoming request
+  console.log("🔍 Incoming scrape request:", {
+    url,
+    username,
+    password: !!password,
+    dynamic,
+    jobId,
+    workflowId
+  });
+
   if (!url) return res.status(400).json({ message: 'URL is required' });
+  if (!req.user?.userId) {
+    return res.status(401).json({ message: 'Unauthorized: Missing user info' });
+  }
 
   try {
-    const robotsUrl = new URL('/robots.txt', url).toString();
-    const robotsResponse = await axios.get(robotsUrl).catch(() => ({ data: '' }));
-    if (robotsResponse.data.includes('Disallow: /in/') && url.includes('linkedin.com/in/')) {
-      return res.status(403).json({ message: 'Scraping LinkedIn profiles disallowed by robots.txt' });
+    // robots.txt check
+    let isBlocked = false;
+    try {
+      const robotsUrl = new URL('/robots.txt', url).toString();
+      const robotsResponse = await axios.get(robotsUrl).catch(() => ({ data: '' }));
+      if (
+        robotsResponse.data.includes('Disallow: /in/') &&
+        url.includes('linkedin.com/in/')
+      ) {
+        isBlocked = true;
+      }
+    } catch (err) {
+      console.warn("⚠️ Failed to load robots.txt:", err.message);
     }
 
-    const data = await scrapePage({ url, username, password, dynamic, workflow, jobId, workflowId });
+    if (isBlocked) {
+      return res
+        .status(403)
+        .json({ message: 'Scraping LinkedIn profiles is disallowed by robots.txt' });
+    }
+
+    // Perform scraping
+    const data = await scrapePage({
+      url,
+      username,
+      password,
+      dynamic,
+      workflow,
+      jobId,
+      workflowId
+    });
+
+    // Update job status if jobId is provided
     if (jobId) {
       await db.collection('jobs').updateOne(
         { jobId, userId: req.user.userId, workflowId },
-        { $set: { status: 'completed', completedAt: new Date() } }
+        {
+          $set: {
+            status: 'completed',
+            completedAt: new Date()
+          }
+        }
       );
     }
-    res.json(data);
+
+    res.json({ success: true, data });
+
   } catch (error) {
-    if (jobId) {
-      await db.collection('jobs').updateOne(
-        { jobId, userId: req.user.userId, workflowId },
-        { $set: { status: 'failed', error: error.message, completedAt: new Date() } }
-      );
+    console.error("❌ Scrape error:", error.stack);
+
+    if (jobId && req.user?.userId) {
+      try {
+        await db.collection('jobs').updateOne(
+          { jobId, userId: req.user.userId, workflowId },
+          {
+            $set: {
+              status: 'failed',
+              error: error.message,
+              completedAt: new Date()
+            }
+          }
+        );
+      } catch (dbErr) {
+        console.error("❌ Failed to update job failure status:", dbErr.message);
+      }
     }
-    console.error('Scrape error:', error.message);
-    res.status(500).json({ message: 'Server error during scraping', details: error.message });
+
+    res.status(500).json({
+      message: 'Server error during scraping',
+      details: error.message
+    });
   }
 });
-
 router.post('/save-results', authenticateToken, async (req, res) => {
   const { jobId, csv, workflowId } = req.body;
   if (!jobId || !csv) return res.status(400).json({ message: 'Job ID and CSV data are required' });
